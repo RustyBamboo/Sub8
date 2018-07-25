@@ -27,16 +27,17 @@ class torp_vision:
     def __init__(self):
 
         # Pull constants from config file
-        self.lower = rospy.get_param('~lower_color_threshold', [0, 0, 60])
-        self.upper = rospy.get_param('~higher_color_threshold', [60, 60, 250])
-        self.min_contour_area = rospy.get_param('~min_contour_area', .001)
+        self.lower = rospy.get_param('~lower_color_threshold', [180, 180, 200])
+        self.upper = rospy.get_param('~higher_color_threshold', [185, 185, 255])
+        self.min_contour_area = rospy.get_param('~min_contour_area', 800)
         self.min_trans = rospy.get_param('~min_trans', .05)
         self.max_velocity = rospy.get_param('~max_velocity', 1)
         self.timeout = rospy.Duration(rospy.get_param('~timeout_seconds'))
-        self.min_observations = rospy.get_param('~min_observations', 8)
+        self.min_observations = rospy.get_param('~min_observations', 12)
         self.camera = rospy.get_param('~camera_tropic',
-                                      '/camera/front/right/image_rect_color')
-
+                                      '/camera/front/left/image_rect_color')
+	print(self.upper)
+	print(self.min_contour_area)
         # Instantiate remaining variables and objects
         self._observations = deque()
         self._pose_pairs = deque()
@@ -199,14 +200,14 @@ class torp_vision:
         output = cv2.bitwise_and(cv_image, cv_image, mask=mask)
 
         # Resize to emphasize shapes
-        resized = cv2.resize(output, (300, 225))
-        ratio = output.shape[0] / float(resized.shape[0])
-        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        #resized = cv2.resize(output, (300, 225))
+        #ratio = output.shape[0] / float(resized.shape[0])
+        gray = cv2.cvtColor(output, cv2.COLOR_BGR2GRAY)
 
         # Blur image so our contours can better find the full shape.
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        return blurred, ratio
+        return blurred
 
     def acquire_targets(self, cv_image):
         # Take in the data and get its dimensions.
@@ -224,12 +225,12 @@ class torp_vision:
         upper = np.array(self.upper, dtype="uint8")
 
         # Generate a mask based on the constants.
-        blurred, ratio = self.mask_image(cv_image, lower, upper)
+        blurred = self.mask_image(cv_image, lower, upper)
 
         # Compute contours
         cnts = cv2.findContours(blurred.copy(), cv2.RETR_EXTERNAL,
                                 cv2.CHAIN_APPROX_SIMPLE)
-
+#	blurred2 = blurred.copy()
         cnts = cnts[1]
         '''
         We use OpenCV to compute our contours and then begin processing them
@@ -248,19 +249,18 @@ class torp_vision:
             M = cv2.moments(c)
             if M["m00"] == 0:
                 M["m00"] = .000001
-            cX = int((M["m10"] / M["m00"]) * ratio)
-            cY = int((M["m01"] / M["m00"]) * ratio)
+            cX = int((M["m10"] / M["m00"]))
+            cY = int((M["m01"] / M["m00"]))
             shape = self.detect(c)
 
             # multiply the contour (x, y)-coordinates by the resize ratio,
             # then draw the contours and the name of the shape on the image
 
             c = c.astype("float")
-            c *= ratio
+            # c *= ratio
             c = c.astype("int")
             if shape == "Target Aquisition Successful" or \
-               shape == "Partial Target Acquisition" or \
-               shape == "unidentified":
+               shape == "Partial Target Acquisition":
                 if self.debug:
                     try:
                         cv2.drawContours(cv_image, [c], -1, (0, 255, 0), 2)
@@ -290,9 +290,7 @@ class torp_vision:
         to derive the approximate 3D coordinates.
         '''
 
-        if m_shape == "Target Aquisition Successful" or \
-                m_shape == "Partial Target Acquisition" or \
-                m_shape == "unidentified":
+        if m_shape == "Target Aquisition Successful":
             try:
                 self.tf_listener.waitForTransform('/map',
                                                   self.camera_model.tfFrame(),

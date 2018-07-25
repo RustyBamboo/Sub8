@@ -1,5 +1,7 @@
 from txros import util
 import numpy as np
+import tf
+import rospy
 from mil_ros_tools import rosmsg_to_numpy
 from mil_misc_tools import FprintFactory
 
@@ -35,6 +37,7 @@ class FireTorpedos(object):
     def __init__(self, sub):
         self.sub = sub
         self.print_info = FprintFactory(title=MISSION).fprint
+        self.tf_listener = tf.TransformListener()
         self.print_bad = FprintFactory(title=MISSION, msg_color="red").fprint
         self.print_good = FprintFactory(
             title=MISSION, msg_color="green").fprint
@@ -86,7 +89,8 @@ class FireTorpedos(object):
 
         self.pattern_done = False
         for i, move in enumerate(self.moves[self.move_index:]):
-            move = self.sub.move.relative(np.array(move)).go(blind=self.BLIND, speed=0.1)
+            move = self.sub.move.relative(np.array(move)).go(
+                blind=self.BLIND, speed=0.1)
             move.addErrback(err)
             yield move
             self.move_index = i + 1
@@ -98,11 +102,28 @@ class FireTorpedos(object):
         self.print_info("FIRING {}".format(target))
         yield self.sub.move.go(blind=self.BLIND, speed=0.1)  # Station hold
         target_position = self.targets[target].position
+        sub_pos = yield self.sub.tx_pose()
+        try:
+            self.tf_listener.waitForTransform('/base_link',
+                                              '/map',
+                                              rospy.Time(0),
+                                              rospy.Duration(0.2))
+        except tf.Exception as e:
+            rospy.logwarn(
+                "Could not transform map to base_link: {}".format(e))
+        (trans, rot) = self.tf_listener.lookupTransform(
+            '/base_link', '/map', rospy.Time(0))
+        target_baselink = (target_position + trans)
+	print(target_baselink)
+        target_baselink[1] = 0
+        target_baselink[2] = 0
+        yield self.sub.move.relative(target_baselink)
         yield self.sub.move.depth(-target_position[2]).go(blind=self.BLIND, speed=.1)
         yield self.sub.move.look_at_without_pitching(target_position).go(
             blind=self.BLIND, speed=.1)
-        yield self.sub.move.set_position(target_position).backward(1).go(
+        yield self.sub.move.set_position(target_position).backward(0).go(
             blind=self.BLIND, speed=.1)
+        yield self.sub.move.zero_roll_and_pitch()
         self.print_good(
             "{} locked. Firing torpedos. Hit confirmed, good job Commander.".
             format(target))
@@ -162,5 +183,6 @@ class FireTorpedos(object):
 @util.cancellableInlineCallbacks
 def run(sub):
     # print('running')
+    rospy.init_node('torp_mission', anonymous=False)
     mission = FireTorpedos(sub)
     yield mission.run()

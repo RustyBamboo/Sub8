@@ -6,14 +6,17 @@ from hydrophones.msg import ProcessedPing
 from sub8_msgs.srv import GuessRequest, GuessRequestRequest
 from twisted.internet import defer
 import random
+import visualization_msgs.msg as visualization_msgs
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point, Vector3
 
 fprint = text_effects.FprintFactory(title="PINGER", msg_color="cyan").fprint
 
 pub_cam_ray = None
 
-SPEED = 0.2
+SPEED = 0.1
 FREQUENCY = 30000
-FREQUENCY_TOL = 500
+FREQUENCY_TOL = 3000
 
 PINGER_HEIGHT = 1.5  # how high to go above pinger
 
@@ -22,6 +25,8 @@ POSITION_TOL = 0.05  # how close to pinger before quiting
 
 @util.cancellableInlineCallbacks
 def run(sub):
+    global pub_cam_ray
+    pub_cam_ray = yield sub.nh.advertise('/pinger/ray', Marker)
 
     fprint('Getting Guess Locations')
 
@@ -81,6 +86,7 @@ def run(sub):
             # Check if the pinger aligns with guess
             check, vec = check_with_guess(vec, pinger_guess)
 
+        fprint('move to {}'.format(vec))
         yield fancy_move(sub, vec)
 
     fprint('Arrived to hydrophones! Going down!')
@@ -98,13 +104,15 @@ def check_with_guess(vec, pinger_guess):
     for guess in pinger_guess:
         guess[2] = 0
     dots = [vec.dot(guess / np.linalg.norm(guess)) for guess in pinger_guess]
-    if dots[0] < -1 and dots[1] < -1:
+    fprint(dots)
+    if dots[0] < 0 and dots[1] < 0:
         fprint(
             'Thought ping was behind. Dot: {}'.format(dots),
             msg_color='yellow')
         # Get the guess that is close to pnger vec
         go_to_guess = pinger_guess[np.argmin(map(abs, dots))]
         go_to_guess = go_to_guess / np.linalg.norm(go_to_guess)
+        fprint('guess {}'.format(go_to_guess))
         return (False, go_to_guess)
     return (True, vec)
 
@@ -113,9 +121,24 @@ def check_with_guess(vec, pinger_guess):
 def transform_to_baselink(sub, pinger_1_req, pinger_2_req):
     transform = yield sub._tf_listener.get_transform('/base_link', '/map')
     print(transform._p)
+    print(transform._q)
     pinger_guess = [
         transform._q_mat.dot(
-            mil_ros_tools.rosmsg_to_numpy(x.location.pose.position) -
+            mil_ros_tools.rosmsg_to_numpy(x.location.pose.position) - 
             transform._p) for x in (pinger_1_req, pinger_2_req)
     ]
+    marker = Marker(ns='pinger', 
+         action=visualization_msgs.Marker.ADD,
+         type=Marker.ARROW, 
+         scale=Vector3(0.2,0.2,2),
+         points=np.array([
+             Point(0 ,0 ,0), 
+             Point(pinger_guess[0][0], pinger_guess[0][1], pinger_guess[0][2])
+         ]))
+    marker.header.frame_id = '/base_link'
+    marker.color.r=0
+    marker.color.g = 1
+    marker.color.a = 1
+    global pub_cam_ray
+    pub_cam_ray.publish(marker)
     defer.returnValue(pinger_guess)

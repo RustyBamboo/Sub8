@@ -6,6 +6,7 @@ import genpy
 
 # Import missions here
 import pinger
+import arm_torpedos
 
 
 fprint = text_effects.FprintFactory(title="AUTO_MISSION").fprint
@@ -34,11 +35,12 @@ def do_mission(sub):
 
     # Chain 1 missions
     try:
-        out = yield run_mission(sub, pinger, 400)
+        out = yield run_mission(sub, pinger, 100)
         if not out:  # if we timeout
             pass
         else:
             pass
+        yield run_mission(sub, arm_torpedos, 120)
     except Exception as e:
         fprint("Error in Chain 1 missions!", msg_color="red")
         print e

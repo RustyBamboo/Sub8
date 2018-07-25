@@ -123,7 +123,7 @@ def compute_deltas(samples,
     """
     period = int(round(sample_rate / ping_freq))
     template_width = period * template_periods + 1
-    template, template_pos = make_template(samples[0, :], .2, template_width)
+    template, template_pos = make_template(samples[0, :], 0.075, template_width)
     if template_pos is None:
         return numpy.empty(0), numpy.empty(0), None, template_width
     start = template_pos - period // 2
